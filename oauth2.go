@@ -20,12 +20,13 @@ package oauth2
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/codegangsta/negroni"
-	"github.com/goincremental/negroni-sessions"
+	sessions "github.com/goincremental/negroni-sessions"
 	"github.com/golang/oauth2"
 )
 
@@ -35,14 +36,14 @@ const (
 )
 
 var (
-	// Path to handle OAuth 2.0 logins.
+	// PathLogin sets the path to handle OAuth 2.0 logins.
 	PathLogin = "/login"
-	// Path to handle OAuth 2.0 logouts.
+	// PathLogout sets to handle OAuth 2.0 logouts.
 	PathLogout = "/logout"
-	// Path to handle callback from OAuth 2.0 backend
+	// PathCallback sets the path to handle callback from OAuth 2.0 backend
 	// to exchange credentials.
 	PathCallback = "/oauth2callback"
-	// Path to handle error cases.
+	// PathError sets the path to handle error cases.
 	PathError = "/oauth2error"
 )
 
@@ -219,8 +220,10 @@ func SetToken(r *http.Request, t interface{}) {
 // if user is not logged in.
 func LoginRequired() negroni.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		log.Println("Login is required")
 		s := sessions.GetSession(r)
 		token := unmarshallToken(s)
+		log.Printf("Here is my token: %+v\n", token)
 		if token == nil || token.IsExpired() {
 			next := url.QueryEscape(r.URL.RequestURI())
 			http.Redirect(rw, r, PathLogin+"?next="+next, http.StatusFound)
@@ -262,6 +265,7 @@ func handleOAuth2Callback(c *oauth2.Config, s sessions.Session, w http.ResponseW
 	}
 	// Store the credentials in the session.
 	val, _ := json.Marshal(t.Token())
+	log.Printf("storing a token %+v\n", val)
 	s.Set(keyToken, val)
 	http.Redirect(w, r, next, http.StatusFound)
 }
