@@ -20,7 +20,6 @@ package oauth2
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -220,10 +219,7 @@ func SetToken(r *http.Request, t interface{}) {
 // if user is not logged in.
 func LoginRequired() negroni.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-		log.Println("Login is required")
-		s := sessions.GetSession(r)
-		token := unmarshallToken(s)
-		log.Printf("Here is my token: %+v\n", token)
+		token := GetToken(r)
 		if token == nil || token.IsExpired() {
 			next := url.QueryEscape(r.URL.RequestURI())
 			http.Redirect(rw, r, PathLogin+"?next="+next, http.StatusFound)
@@ -265,7 +261,6 @@ func handleOAuth2Callback(c *oauth2.Config, s sessions.Session, w http.ResponseW
 	}
 	// Store the credentials in the session.
 	val, _ := json.Marshal(t.Token())
-	log.Printf("storing a token %+v\n", val)
 	s.Set(keyToken, val)
 	http.Redirect(w, r, next, http.StatusFound)
 }
