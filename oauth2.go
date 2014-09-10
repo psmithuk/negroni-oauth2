@@ -18,6 +18,8 @@
 package oauth2
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -153,12 +155,10 @@ func LinkedIn(opts *Options) negroni.Handler {
 func NewOAuth2Provider(opts *Options, authUrl, tokenUrl string) negroni.HandlerFunc {
 
 	options := &oauth2.Options{
-		ClientID:       opts.ClientID,
-		ClientSecret:   opts.ClientSecret,
-		RedirectURL:    opts.RedirectURL,
-		Scopes:         opts.Scopes,
-		AccessType:     opts.AccessType,
-		ApprovalPrompt: opts.ApprovalPrompt,
+		ClientID:     opts.ClientID,
+		ClientSecret: opts.ClientSecret,
+		RedirectURL:  opts.RedirectURL,
+		Scopes:       opts.Scopes,
 	}
 
 	config, err := oauth2.NewConfig(options, authUrl, tokenUrl)
@@ -229,6 +229,15 @@ func LoginRequired() negroni.HandlerFunc {
 	}
 }
 
+func newState() string {
+	var p [16]byte
+	_, err := rand.Read(p[:])
+	if err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(p[:])
+}
+
 func login(c *oauth2.Config, s sessions.Session, w http.ResponseWriter, r *http.Request) {
 	next := extractPath(r.URL.Query().Get(keyNextPage))
 	if s.Get(keyToken) == nil {
@@ -236,7 +245,7 @@ func login(c *oauth2.Config, s sessions.Session, w http.ResponseWriter, r *http.
 		if next == "" {
 			next = "/"
 		}
-		http.Redirect(w, r, c.AuthCodeURL(next), http.StatusFound)
+		http.Redirect(w, r, c.AuthCodeURL(newState(), "online", "auto"), http.StatusFound)
 		return
 	}
 	// No need to login, redirect to the next page.
