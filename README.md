@@ -17,8 +17,9 @@ import (
 	"net/http"
 
 	"github.com/codegangsta/negroni"
-	"github.com/goincremental/negroni-oauth2"
-	"github.com/goincremental/negroni-sessions"
+	oauth2 "github.com/goincremental/negroni-oauth2"
+	sessions "github.com/goincremental/negroni-sessions"
+	"github.com/goincremental/negroni-sessions/cookiestore"
 )
 
 func main() {
@@ -39,12 +40,12 @@ func main() {
 	secure.UseHandler(secureMux)
 
 	n := negroni.New()
-	n.Use(sessions.Sessions("my_session", sessions.NewCookieStore([]byte("secret123"))))
-	n.Use(oauth2.Google(&oauth2.Options{
+	n.Use(sessions.Sessions("my_session", cookiestore.New([]byte("secret123"))))
+	n.Use(oauth2.Google(&oauth2.Config{
 		ClientID:     "client_id",
 		ClientSecret: "client_secret",
-		RedirectURL:  "redirect_url",
-		Scopes:       []string{"email"},
+		RedirectURL:  "refresh_url",
+		Scopes:       []string{"https://www.googleapis.com/auth/drive"},
 	}))
 
 	router := http.NewServeMux()
@@ -52,7 +53,7 @@ func main() {
 	//routes added to mux do not require authentication
 	router.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		token := oauth2.GetToken(req)
-		if token == nil || token.IsExpired() {
+		if token == nil || !token.Valid() {
 			fmt.Fprintf(w, "not logged in, or the access token is expired")
 			return
 		}
@@ -84,8 +85,13 @@ oauth2.PathLogout = "/oauth2logout"
 ...
 ~~~
 
-## Authors
+## Contributors
 * [David Bochenski](http://github.com/bochenski)
+* [JT Olds](https://github.com/jtolds)
+* [minjatJ](https://github.com/minjatJ)
+* [Thibaut Colar](https://github.com/tcolar)
+* [Matt Bostock](https://github.com/mattbostock)
+* [Deniz Eren](https://github.com/denizeren)
 
 ## Derived from [martini-contrib/oauth2](http://github.com/martini-contrib/oauth2)
 

@@ -18,6 +18,8 @@
 package oauth2
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -25,71 +27,46 @@ import (
 	"time"
 
 	"github.com/codegangsta/negroni"
-	"github.com/goincremental/negroni-sessions"
-	"github.com/golang/oauth2"
+	sessions "github.com/goincremental/negroni-sessions"
+	"golang.org/x/oauth2"
 )
 
 const (
-	keyToken    = "oauth2_token"
-	keyNextPage = "next"
+	codeRedirect = 302
+	keyToken     = "oauth2_token"
+	keyNextPage  = "next"
+	keyState     = "state"
 )
 
 var (
-	// Path to handle OAuth 2.0 logins.
+	// PathLogin sets the path to handle OAuth 2.0 logins.
 	PathLogin = "/login"
-	// Path to handle OAuth 2.0 logouts.
+	// PathLogout sets to handle OAuth 2.0 logouts.
 	PathLogout = "/logout"
-	// Path to handle callback from OAuth 2.0 backend
+	// PathCallback sets the path to handle callback from OAuth 2.0 backend
 	// to exchange credentials.
 	PathCallback = "/oauth2callback"
-	// Path to handle error cases.
+	// PathError sets the path to handle error cases.
 	PathError = "/oauth2error"
 )
 
-type Options struct {
-	// ClientID is the OAuth client identifier used when communicating with
-	// the configured OAuth provider.
-	ClientID string `json:"client_id"`
+type Config oauth2.Config
 
-	// ClientSecret is the OAuth client secret used when communicating with
-	// the configured OAuth provider.
-	ClientSecret string `json:"client_secret"`
-
-	// RedirectURL is the URL to which the user will be returned after
-	// granting (or denying) access.
-	RedirectURL string `json:"redirect_url"`
-
-	// Optional, identifies the level of access being requested.
-	Scopes []string `json:"scopes"`
-
-	// Optional, "online" (default) or "offline", no refresh token if "online"
-	AccessType string `json:"omit"`
-
-	// ApprovalPrompt indicates whether the user should be
-	// re-prompted for consent. If set to "auto" (default) the
-	// user will be prompted only if they haven't previously
-	// granted consent and the code can only be exchanged for an
-	// access token.
-	// If set to "force" the user will always be prompted, and the
-	// code can be exchanged for a refresh token.
-	ApprovalPrompt string `json:"omit"`
-}
-
-// Represents a container that contains
+// Tokens Represents a container that contains
 // user's OAuth 2.0 access and refresh tokens.
 type Tokens interface {
 	Access() string
 	Refresh() string
-	IsExpired() bool
+	Valid() bool
 	ExpiryTime() time.Time
-	ExtraData(string) string
+	ExtraData(string) interface{}
 }
 
 type token struct {
 	oauth2.Token
 }
 
-func (t *token) ExtraData(key string) string {
+func (t *token) ExtraData(key string) interface{} {
 	return t.Extra(key)
 }
 
@@ -105,11 +82,11 @@ func (t *token) Refresh() string {
 
 // Returns whether the access token is
 // expired or not.
-func (t *token) IsExpired() bool {
+func (t *token) Valid() bool {
 	if t == nil {
 		return true
 	}
-	return t.Expired()
+	return t.Token.Valid()
 }
 
 // Returns the expiry time of the user's
@@ -118,68 +95,66 @@ func (t *token) ExpiryTime() time.Time {
 	return t.Expiry
 }
 
-// // Formats tokens into string.
-// func (t *token) String() string {
-// 	return fmt.Sprintf("tokens: %v", t)
-// }
+// String returns the string representation of the token.
+func (t *token) String() string {
+	return fmt.Sprintf("tokens: %v", t)
+}
 
 // Returns a new Google OAuth 2.0 backend endpoint.
-func Google(opts *Options) negroni.Handler {
+func Google(config *Config) negroni.Handler {
 	authUrl := "https://accounts.google.com/o/oauth2/auth"
 	tokenUrl := "https://accounts.google.com/o/oauth2/token"
-	return NewOAuth2Provider(opts, authUrl, tokenUrl)
+	return NewOAuth2Provider(config, authUrl, tokenUrl)
 }
 
 // Returns a new Github OAuth 2.0 backend endpoint.
-func Github(opts *Options) negroni.Handler {
+func Github(config *Config) negroni.Handler {
 	authUrl := "https://github.com/login/oauth/authorize"
 	tokenUrl := "https://github.com/login/oauth/access_token"
-	return NewOAuth2Provider(opts, authUrl, tokenUrl)
+	return NewOAuth2Provider(config, authUrl, tokenUrl)
 }
 
-func Facebook(opts *Options) negroni.Handler {
+func Facebook(config *Config) negroni.Handler {
 	authUrl := "https://www.facebook.com/dialog/oauth"
 	tokenUrl := "https://graph.facebook.com/oauth/access_token"
-	return NewOAuth2Provider(opts, authUrl, tokenUrl)
+	return NewOAuth2Provider(config, authUrl, tokenUrl)
 }
 
-func LinkedIn(opts *Options) negroni.Handler {
+func LinkedIn(config *Config) negroni.Handler {
 	authUrl := "https://www.linkedin.com/uas/oauth2/authorization"
 	tokenUrl := "https://www.linkedin.com/uas/oauth2/accessToken"
-	return NewOAuth2Provider(opts, authUrl, tokenUrl)
+	return NewOAuth2Provider(config, authUrl, tokenUrl)
 }
 
 // Returns a generic OAuth 2.0 backend endpoint.
-func NewOAuth2Provider(opts *Options, authUrl, tokenUrl string) negroni.HandlerFunc {
-
-	options := &oauth2.Options{
-		ClientID:     opts.ClientID,
-		ClientSecret: opts.ClientSecret,
-		RedirectURL:  opts.RedirectURL,
-		Scopes:       opts.Scopes,
+func NewOAuth2Provider(config *Config, authUrl, tokenUrl string) negroni.HandlerFunc {
+	c := &oauth2.Config{
+		ClientID:     config.ClientID,
+		ClientSecret: config.ClientSecret,
+		Scopes:       config.Scopes,
+		RedirectURL:  config.RedirectURL,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  authUrl,
+			TokenURL: tokenUrl,
+		},
 	}
 
-	config, err := oauth2.NewConfig(options, authUrl, tokenUrl)
-	if err != nil {
-		panic(fmt.Sprintf("oauth2: %s", err))
-	}
-
-	return func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	return func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 		s := sessions.GetSession(r)
 
 		if r.Method == "GET" {
 			switch r.URL.Path {
 			case PathLogin:
-				login(opts, config, s, rw, r)
+				login(c, s, w, r)
 			case PathLogout:
-				logout(s, rw, r)
+				logout(s, w, r)
 			case PathCallback:
-				handleOAuth2Callback(config, s, rw, r)
+				handleOAuth2Callback(c, s, w, r)
 			default:
-				next(rw, r)
+				next(w, r)
 			}
 		} else {
-			next(rw, r)
+			next(w, r)
 		}
 
 	}
@@ -206,7 +181,7 @@ func SetToken(r *http.Request, t interface{}) {
 	tk := unmarshallToken(s)
 	if tk != nil {
 		// check if the access token is expired
-		if tk.IsExpired() && tk.Refresh() == "" {
+		if !tk.Valid() && tk.Refresh() == "" {
 			s.Delete(keyToken)
 			tk = nil
 		}
@@ -217,27 +192,41 @@ func SetToken(r *http.Request, t interface{}) {
 // if user is not logged in.
 func LoginRequired() negroni.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-		s := sessions.GetSession(r)
-		token := unmarshallToken(s)
-		if token == nil || token.IsExpired() {
+		token := GetToken(r)
+		if token == nil || !token.Valid() {
 			// Set token to null to avoid redirection loop
 			SetToken(r, nil)
 			next := url.QueryEscape(r.URL.RequestURI())
-			http.Redirect(rw, r, PathLogin+"?next="+next, http.StatusFound)
+			http.Redirect(rw, r, PathLogin+"?"+keyNextPage+"="+next, http.StatusFound)
 		} else {
 			next(rw, r)
 		}
 	}
 }
 
-func login(opts *Options, c *oauth2.Config, s sessions.Session, w http.ResponseWriter, r *http.Request) {
+func newState() string {
+	var p [16]byte
+	_, err := rand.Read(p[:])
+	if err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(p[:])
+}
+
+func login(config *oauth2.Config, s sessions.Session, w http.ResponseWriter, r *http.Request) {
 	next := extractPath(r.URL.Query().Get(keyNextPage))
+
 	if s.Get(keyToken) == nil {
 		// User is not logged in.
 		if next == "" {
 			next = "/"
 		}
-		http.Redirect(w, r, c.AuthCodeURL(next, opts.AccessType, opts.ApprovalPrompt), http.StatusFound)
+
+		state := newState()
+		// store the next url and state token in the session
+		s.Set(keyState, state)
+		s.Set(keyNextPage, next)
+		http.Redirect(w, r, config.AuthCodeURL(state, oauth2.AccessTypeOffline), http.StatusFound)
 		return
 	}
 	// No need to login, redirect to the next page.
@@ -250,10 +239,23 @@ func logout(s sessions.Session, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, next, http.StatusFound)
 }
 
-func handleOAuth2Callback(c *oauth2.Config, s sessions.Session, w http.ResponseWriter, r *http.Request) {
-	next := extractPath(r.URL.Query().Get("state"))
+func handleOAuth2Callback(config *oauth2.Config, s sessions.Session, w http.ResponseWriter, r *http.Request) {
+	providedState := extractPath(r.URL.Query().Get("state"))
+	fmt.Printf("Got state from request %s\n", providedState)
+
+	//verify that the provided state is the state we generated
+	//if it is not, then redirect to the error page
+	originalState := s.Get(keyState)
+	fmt.Printf("Got state from session %s\n", originalState)
+	if providedState != originalState {
+		http.Redirect(w, r, PathError, http.StatusFound)
+		return
+	}
+
+	next := s.Get(keyNextPage).(string)
+	fmt.Printf("Got a next page from the session: %s\n", next)
 	code := r.URL.Query().Get("code")
-	t, err := c.NewTransportWithCode(code)
+	t, err := config.Exchange(oauth2.NoContext, code)
 	if err != nil {
 		// Pass the error message, or allow dev to provide its own
 		// error handler.
@@ -261,7 +263,7 @@ func handleOAuth2Callback(c *oauth2.Config, s sessions.Session, w http.ResponseW
 		return
 	}
 	// Store the credentials in the session.
-	val, _ := json.Marshal(t.Token())
+	val, _ := json.Marshal(t)
 	s.Set(keyToken, val)
 	http.Redirect(w, r, next, http.StatusFound)
 }

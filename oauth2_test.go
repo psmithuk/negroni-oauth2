@@ -21,17 +21,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/codegangsta/negroni"
-	"github.com/goincremental/negroni-sessions"
+	sessions "github.com/goincremental/negroni-sessions"
+	"github.com/goincremental/negroni-sessions/cookiestore"
 )
 
 func Test_LoginRedirect(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	n := negroni.New()
-	n.Use(sessions.Sessions("my_session", sessions.NewCookieStore([]byte("secret123"))))
-	n.Use(Google(&Options{
+	n.Use(sessions.Sessions("my_session", cookiestore.New([]byte("secret123"))))
+	n.Use(Google(&Config{
 		ClientID:     "client_id",
 		ClientSecret: "client_secret",
 		RedirectURL:  "refresh_url",
@@ -45,7 +47,8 @@ func Test_LoginRedirect(t *testing.T) {
 	if recorder.Code != 302 {
 		t.Errorf("Not being redirected to the auth page.")
 	}
-	if location != "https://accounts.google.com/o/oauth2/auth?client_id=client_id&redirect_uri=refresh_url&response_type=code&scope=x+y&state=%2F" {
+	t.Logf(location)
+	if strings.HasPrefix("https://accounts.google.com/o/oauth2/auth?access_type=online&approval_prompt=auto&client_id=client_id&redirect_uri=refresh_url&response_type=code&scope=x+y&state=", location) {
 		t.Errorf("Not being redirected to the right page, %v found", location)
 	}
 }
@@ -53,8 +56,8 @@ func Test_LoginRedirect(t *testing.T) {
 func Test_LoginRedirectAfterLoginRequired(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	n := negroni.New()
-	n.Use(sessions.Sessions("my_session", sessions.NewCookieStore([]byte("secret123"))))
-	n.Use(Google(&Options{
+	n.Use(sessions.Sessions("my_session", cookiestore.New([]byte("secret123"))))
+	n.Use(Google(&Config{
 		ClientID:     "client_id",
 		ClientSecret: "client_secret",
 		RedirectURL:  "refresh_url",
@@ -86,11 +89,11 @@ func Test_LoginRedirectAfterLoginRequired(t *testing.T) {
 
 func Test_Logout(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	s := sessions.NewCookieStore([]byte("secret123"))
+	s := cookiestore.New([]byte("secret123"))
 
 	n := negroni.Classic()
 	n.Use(sessions.Sessions("my_session", s))
-	n.Use(Google(&Options{
+	n.Use(Google(&Config{
 		ClientID:     "foo",
 		ClientSecret: "foo",
 		RedirectURL:  "foo",
@@ -125,11 +128,11 @@ func Test_Logout(t *testing.T) {
 
 func Test_LogoutOnAccessTokenExpiration(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	s := sessions.NewCookieStore([]byte("secret123"))
+	s := cookiestore.New([]byte("secret123"))
 
 	n := negroni.Classic()
 	n.Use(sessions.Sessions("my_session", s))
-	n.Use(Google(&Options{
+	n.Use(Google(&Config{
 		ClientID:     "foo",
 		ClientSecret: "foo",
 		RedirectURL:  "foo",
@@ -157,8 +160,8 @@ func Test_LogoutOnAccessTokenExpiration(t *testing.T) {
 func Test_LoginRequired(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	n := negroni.Classic()
-	n.Use(sessions.Sessions("my_session", sessions.NewCookieStore([]byte("secret123"))))
-	n.Use(Google(&Options{
+	n.Use(sessions.Sessions("my_session", cookiestore.New([]byte("secret123"))))
+	n.Use(Google(&Config{
 		ClientID:     "foo",
 		ClientSecret: "foo",
 		RedirectURL:  "foo",

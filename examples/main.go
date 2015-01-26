@@ -17,13 +17,32 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/codegangsta/negroni"
-	"github.com/goincremental/negroni-oauth2"
-	"github.com/goincremental/negroni-sessions"
+	oauth2 "github.com/goincremental/negroni-oauth2"
+	sessions "github.com/goincremental/negroni-sessions"
+	"github.com/goincremental/negroni-sessions/cookiestore"
+	"github.com/joho/godotenv"
 )
 
+func getEnv(key string, defaultValue string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		v = defaultValue
+	}
+	return v
+}
+
 func main() {
+	//Loads environment variables from a .env file
+	godotenv.Load("environment")
+
+	var (
+		clientID     = getEnv("OAUTH2_CLIENT_ID", "client_id")
+		clientSecret = getEnv("OAUTH2_CLIENT_SECRET", "client_secret")
+		redirectURL  = getEnv("OAUTH2_REDIRECT_URL", "redirect_url")
+	)
 
 	secureMux := http.NewServeMux()
 
@@ -41,12 +60,12 @@ func main() {
 	secure.UseHandler(secureMux)
 
 	n := negroni.New()
-	n.Use(sessions.Sessions("my_session", sessions.NewCookieStore([]byte("secret123"))))
-	n.Use(oauth2.Google(&oauth2.Options{
-		ClientID:     "client_id",
-		ClientSecret: "client_secret",
-		RedirectURL:  "redirect_url",
-		Scopes:       []string{"email"},
+	n.Use(sessions.Sessions("my_session", cookiestore.New([]byte("secret123"))))
+	n.Use(oauth2.Google(&oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURL:  redirectURL,
+		Scopes:       []string{"https://www.googleapis.com/auth/drive"},
 	}))
 
 	router := http.NewServeMux()
@@ -54,7 +73,7 @@ func main() {
 	//routes added to mux do not require authentication
 	router.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		token := oauth2.GetToken(req)
-		if token == nil || token.IsExpired() {
+		if token == nil || !token.Valid() {
 			fmt.Fprintf(w, "not logged in, or the access token is expired")
 			return
 		}
